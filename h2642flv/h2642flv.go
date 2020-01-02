@@ -1,4 +1,4 @@
-package Stream2File
+package h2642flv
 
 import (
 	"bufio"
@@ -15,9 +15,12 @@ var (
 	closeSplitChan  = false
 	closeDecodeChan = false
 	wg              = sync.WaitGroup{}
+
+	prelen    = 304
+	timestamp = 0
 )
 
-func Stream2File(inPath string, outPath string) {
+func H2642flv(inPath, outPath string) {
 	fi, err := os.Open(inPath)
 	if err != nil {
 		log.Println("open error : " + err.Error())
@@ -50,7 +53,6 @@ func splitFrame() {
 
 	wg.Add(1)
 	defer func() {
-
 		wg.Done()
 	}()
 
@@ -98,29 +100,27 @@ func decodeFrame(outPath string) {
 	if err != nil {
 		log.Println("open error : " + err.Error())
 	}
-	startI := false
-
+	w := bufio.NewWriter(fi)
 	defer func() {
+		log.Println("exit")
+		w.Flush()
 		fi.Close()
 		wg.Done()
 	}()
 
 	wg.Add(1)
-	w := bufio.NewWriter(fi)
 
+	//w.Write([]byte{0x46, 0x4c, 0x56, 0x01, 0x01, 0x00, 0x00, 0x00, 0x09})
+	w.Write(getHeader())
 	i := 0
+	tempsps := []byte{}
 	for {
 		select {
 		case frame := <-frameChan:
-			if startI {
-				w.Write([]byte{0x00, 0x00, 0x00, 0x01})
-				w.Write(frame)
-			}
 
+			flen := len(frame)
 			i++
-			log.Println()
-			log.Println("帧", i, "的数据长度：", len(frame))
-
+			log.Println("帧", i, "的数据长度：", flen)
 			dataStream := model.StreamData{Data: frame, Index: 0}
 			_ = dataStream.F(1)
 			//log.Printf("forbidden_bit %d\n", ForbiddenBit)
@@ -131,12 +131,7 @@ func decodeFrame(outPath string) {
 
 			switch NalUnitType {
 			case NalUnitTypes.SPS:
-				if !startI {
-					w.Write([]byte{0x00, 0x00, 0x00, 0x01})
-					w.Write(frame)
-				}
-				startI = true
-
+				tempsps = frame
 				log.Println("SPS")
 				//spsStream := model.SpsStream{Data: frame[1:], Index: 0}
 				profileIdc := dataStream.U(8)
@@ -192,15 +187,27 @@ func decodeFrame(outPath string) {
 
 				vuiParametersPresentFlag := dataStream.U(1)
 				log.Printf("vui_parameters_present_flag %d\n", vuiParametersPresentFlag)
-
+				break
 			case NalUnitTypes.PPS:
+				log.Println("PPS")
+				flvspspps(w, tempsps, frame)
+				break
 			case NalUnitTypes.SEI:
+				log.Println("SEI")
+				break
 			case NalUnitTypes.IDR:
 				log.Println("IDR")
+				flvnalu(w, 0x17, frame)
+				break
 			case NalUnitTypes.NOIDR:
+				log.Println("NOIDR")
+				flvnalu(w, 0x27, frame)
+				break
 			default:
+				break
 			}
 			break
+			w.Write(frame)
 		default:
 			if closeDecodeChan {
 				log.Println("关闭切割decode协程")
@@ -208,4 +215,80 @@ func decodeFrame(outPath string) {
 			}
 		}
 	}
+}
+
+func flvnalu(w *bufio.Writer, fc byte, nalu []byte) {
+	nlen := len(nalu)
+	dlen := 5 + nlen + 4
+	w.Write([]byte{byte(prelen >> 24), byte(prelen >> 16), byte(prelen >> 8), byte(prelen)})
+	w.Write([]byte{0x09, //type
+		byte(dlen >> 16), byte(dlen >> 8), byte(dlen), //tag data len
+		byte(timestamp >> 16), byte(timestamp >> 8), byte(timestamp), byte(timestamp >> 24), //timestamp
+		0x00, 0x00, 0x00}) //stream iD
+	w.Write([]byte{fc,
+		0x01,              //AVCPacketType
+		0x00, 0x00, 0x00}) //Composition Time
+
+	w.Write([]byte{byte(nlen >> 24), byte(nlen >> 16), byte(nlen >> 8), byte(nlen)})
+	w.Write(nalu)
+	timestamp += 40
+	prelen = dlen + 11
+}
+
+func flvspspps(w *bufio.Writer, sps []byte, pps []byte) {
+	slen := len(sps)
+	plen := len(pps)
+	dlen := 5 + slen + 8 + plen + 3
+
+	if prelen == 398 {
+		panic(0)
+	}
+
+	w.Write([]byte{byte(prelen >> 24), byte(prelen >> 16), byte(prelen >> 8), byte(prelen)})
+	w.Write([]byte{0x09, //type
+		byte(dlen >> 16), byte(dlen >> 8), byte(dlen), //tag data len
+		byte(timestamp >> 16), byte(timestamp >> 8), byte(timestamp), byte(timestamp >> 24), //timestamp
+		0x00, 0x00, 0x00}) //stream iD
+
+	w.Write([]byte{0x17, 0x00, 0x00, 0x00, 0x00})
+	w.Write([]byte{
+		0x01,                                //configurationVersion
+		sps[1],                              //AVCProfileIndication
+		sps[2],                              //profile_compatibiltity
+		sps[3],                              //AVCLevelIndication
+		0xFF,                                //lengthSizeMinusOne
+		0xE1,                                //numOfSequenceParameterSets
+		byte(len(sps) >> 8), byte(len(sps)), //sequenceParameterSetLength
+	})
+	w.Write(sps)
+	w.Write([]byte{
+		0x01,       //numOfPictureParamterSets
+		0x00, 0x04, //pictureParameterSetLength
+	})
+	//timestamp += 125
+	w.Write(pps)
+	prelen = dlen + 11
+
+}
+
+func getHeader() []byte {
+	fi, err := os.Open("source/receive.flv")
+	if err != nil {
+		log.Println("open error : " + err.Error())
+	}
+	defer fi.Close()
+	r := bufio.NewReader(fi)
+
+	buf := make([]byte, 20480)
+	_, err = r.Read(buf)
+	if err != nil && err.Error() != "EOF" {
+		log.Println("read error : " + err.Error())
+	}
+	log.Println(buf[:9])
+	log.Println(buf[9:13])
+	taglen := int(buf[14])<<16 + int(buf[15])<<8 + int(buf[16])
+	log.Println("taglen", taglen)
+	buf[4] = 0x01
+	log.Println(buf[:24+taglen])
+	return buf[:24+taglen]
 }
