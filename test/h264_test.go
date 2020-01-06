@@ -23,8 +23,8 @@ func TestStream2File(t *testing.T) {
 }
 
 func TestH2642flv(t *testing.T) {
-	inPath := "source/7.h264"
-	outPath := "source/7.flv"
+	inPath := "source/test2.h264"
+	outPath := "source/test2.flv"
 
 	h2642flv.H2642flv(inPath, outPath)
 }

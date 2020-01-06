@@ -75,6 +75,13 @@ func splitFrame() {
 					}
 					frameNum++ //frame数量+1
 					i += 4
+				} else if buf[i] == 0x00 && buf[i+1] == 0x00 && buf[i+2] == 0x01 {
+					if i != 0 {
+						frameChan <- frame
+						frame = make([]byte, 0)
+					}
+					frameNum++ //frame数量+1
+					i += 3
 				} else {
 					frame = append(frame, buf[i])
 					i++
@@ -110,8 +117,10 @@ func decodeFrame(outPath string) {
 
 	wg.Add(1)
 
-	//w.Write([]byte{0x46, 0x4c, 0x56, 0x01, 0x01, 0x00, 0x00, 0x00, 0x09})
-	w.Write(getHeader())
+	first := true
+
+	w.Write([]byte{0x46, 0x4c, 0x56, 0x01, 0x01, 0x00, 0x00, 0x00, 0x09})
+	//w.Write(getHeader())
 	i := 0
 	tempsps := []byte{}
 	for {
@@ -133,64 +142,13 @@ func decodeFrame(outPath string) {
 			case NalUnitTypes.SPS:
 				tempsps = frame
 				log.Println("SPS")
-				//spsStream := model.SpsStream{Data: frame[1:], Index: 0}
-				profileIdc := dataStream.U(8)
-				log.Printf("profile_idc %d\n", profileIdc)
-				constraintSet0Flag := dataStream.U(1)
-				log.Printf("constraint_set0_flag %d\n", constraintSet0Flag)
-				constraintSet1Flag := dataStream.U(1)
-				log.Printf("constraint_set1_flag %d\n", constraintSet1Flag)
-				constraintSet2Flag := dataStream.U(1)
-				log.Printf("constraint_set2_flag %d\n", constraintSet2Flag)
-				constraintSet3Flag := dataStream.U(1)
-				log.Printf("constraint_set3_flag %d\n", constraintSet3Flag)
-				constraintSet4Flag := dataStream.U(1)
-				log.Printf("constraint_set4_flag %d\n", constraintSet4Flag)
-				constraintSet5Flag := dataStream.U(1)
-				log.Printf("constraint_set5_flag %d\n", constraintSet5Flag)
-				reservedZero2bits := dataStream.U(2)
-				log.Printf("reserved_zero_2bits %d\n", reservedZero2bits)
-				levelIdc := dataStream.U(8)
-				log.Printf("level_idc %d\n", levelIdc)
-				seqParameterSetId := dataStream.UE()
-				log.Printf("seq_parameter_set_id %d\n", seqParameterSetId)
-				log2MaxFrameNumMinus4 := dataStream.UE()
-				log.Printf("log2_max_frame_num_minus4 %d\n", log2MaxFrameNumMinus4)
-				picOrderCntType := dataStream.UE()
-				log.Printf("pic_order_cnt_type %d\n", picOrderCntType)
-				if picOrderCntType == 0 {
-					log2MaxPicOrderCntLsbMinus4 := dataStream.UE()
-					log.Printf("log2_max_pic_order_cnt_lsb_minus4 %d\n", log2MaxPicOrderCntLsbMinus4)
-				}
-				maxNumRefFrames := dataStream.UE()
-				log.Printf("max_num_ref_frames %d\n", maxNumRefFrames)
-				gapsInFrameNumValueAllowedFlag := dataStream.U(1)
-				log.Printf("gaps_in_frame_num_value_allowed_flag %d\n", gapsInFrameNumValueAllowedFlag)
-
-				picWidthInMbsMinus1 := dataStream.UE()
-				log.Printf("pic_width_in_mbs_minus1 %d\n", picWidthInMbsMinus1)
-
-				log.Println("宽", (picWidthInMbsMinus1+1)*16)
-
-				picHeightInMapUnitsMinus1 := dataStream.UE()
-				log.Printf("pic_height_in_map_units_minus1 %d\n", picHeightInMapUnitsMinus1)
-
-				frameMbsOnlyFlag := dataStream.U(1)
-				log.Printf("frame_mbs_only_flag %d\n", frameMbsOnlyFlag)
-				log.Println("高", (2-frameMbsOnlyFlag)*(picHeightInMapUnitsMinus1+1)*16)
-
-				direct8x8InferenceFlag := dataStream.U(1)
-				log.Printf("direct_8x8_inference_flag %d\n", direct8x8InferenceFlag)
-
-				frameCroppingFlag := dataStream.U(1)
-				log.Printf("frame_cropping_flag %d\n", frameCroppingFlag)
-
-				vuiParametersPresentFlag := dataStream.U(1)
-				log.Printf("vui_parameters_present_flag %d\n", vuiParametersPresentFlag)
 				break
 			case NalUnitTypes.PPS:
 				log.Println("PPS")
-				flvspspps(w, tempsps, frame)
+				if first {
+					flvspspps(w, tempsps, frame)
+					first = false
+				}
 				break
 			case NalUnitTypes.SEI:
 				log.Println("SEI")
@@ -207,7 +165,6 @@ func decodeFrame(outPath string) {
 				break
 			}
 			break
-			w.Write(frame)
 		default:
 			if closeDecodeChan {
 				log.Println("关闭切割decode协程")
@@ -220,6 +177,7 @@ func decodeFrame(outPath string) {
 func flvnalu(w *bufio.Writer, fc byte, nalu []byte) {
 	nlen := len(nalu)
 	dlen := 5 + nlen + 4
+
 	w.Write([]byte{byte(prelen >> 24), byte(prelen >> 16), byte(prelen >> 8), byte(prelen)})
 	w.Write([]byte{0x09, //type
 		byte(dlen >> 16), byte(dlen >> 8), byte(dlen), //tag data len
@@ -228,6 +186,15 @@ func flvnalu(w *bufio.Writer, fc byte, nalu []byte) {
 	w.Write([]byte{fc,
 		0x01,              //AVCPacketType
 		0x00, 0x00, 0x00}) //Composition Time
+
+	//i := 0
+	//for ; i+step < nlen; i += step {
+	//	w.Write([]byte{byte(step >> 24), byte(step >> 16), byte(step >> 8), byte(step)})
+	//	w.Write(nalu[:i+step])
+	//}
+	//temp := nlen - i
+	//w.Write([]byte{byte(temp >> 24), byte(temp >> 16), byte(temp >> 8), byte(temp)})
+	//w.Write(nalu[i:])
 
 	w.Write([]byte{byte(nlen >> 24), byte(nlen >> 16), byte(nlen >> 8), byte(nlen)})
 	w.Write(nalu)
@@ -262,8 +229,8 @@ func flvspspps(w *bufio.Writer, sps []byte, pps []byte) {
 	})
 	w.Write(sps)
 	w.Write([]byte{
-		0x01,       //numOfPictureParamterSets
-		0x00, 0x04, //pictureParameterSetLength
+		0x01,                                //numOfPictureParamterSets
+		byte(len(pps) >> 8), byte(len(pps)), //pictureParameterSetLength
 	})
 	//timestamp += 125
 	w.Write(pps)
