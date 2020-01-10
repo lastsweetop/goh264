@@ -17,7 +17,7 @@ var (
 	wg              = sync.WaitGroup{}
 )
 
-func Stream2File(inPath string, outPath string) {
+func Transfer(inPath string, outPath string) {
 	fi, err := os.Open(inPath)
 	if err != nil {
 		log.Println("open error : " + err.Error())

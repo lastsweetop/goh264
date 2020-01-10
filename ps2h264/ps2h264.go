@@ -15,7 +15,7 @@ var (
 	wg             = sync.WaitGroup{}
 )
 
-func Ps2H264(inPath, outPath string) {
+func Transfer(inPath, outPath string) {
 	fi, err := os.Open(inPath)
 	if err != nil {
 		log.Println("open error : " + err.Error())
@@ -58,10 +58,6 @@ func splitPS() {
 			temp = make([]byte, 0)
 			i := 0
 			for i < len(buf) {
-				if i > len(buf)-4 {
-					temp = buf[i:] //剩余不足4个字节的数据
-					break
-				}
 				if buf[i] == 0x00 && buf[i+1] == 0x00 && buf[i+2] == 0x01 && buf[i+3] == 0xba {
 					if i != 0 {
 						pspkgChan <- pspkg
@@ -128,6 +124,7 @@ func writePES(outPath string) {
 			log.Println("len(pespkg)", len(pespkg))
 			for i := 0; i < len(pespkg); {
 				peslen := int(pespkg[i+4])<<8 + int(pespkg[i+5])
+				log.Println("peslen", peslen)
 				pesheaderlength := int(pespkg[i+8])
 
 				if i+9+pesheaderlength > len(pespkg) {

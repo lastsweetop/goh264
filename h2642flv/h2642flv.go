@@ -20,7 +20,7 @@ var (
 	timestamp = 0
 )
 
-func H2642flv(inPath, outPath string) {
+func Transfer(inPath, outPath string) {
 	fi, err := os.Open(inPath)
 	if err != nil {
 		log.Println("open error : " + err.Error())
