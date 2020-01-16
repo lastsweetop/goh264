@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"goh264/tools"
 	"log"
+	"math"
 	"os"
 	"sync"
 )
@@ -173,26 +174,52 @@ func splitPes(outPath string) {
 			//log.Println(buf)
 			//log.Println("streamId", streamId)
 			if left >= len(buf) {
-				left = left - len(buf)
-				w.Write(buf)
+				if left == math.MaxInt32 {
+					j := 0
+					for ; j+3 < len(buf); j++ {
+						if buf[j] == 0x00 && buf[j+1] == 0x00 && buf[j+2] == 0x01 && buf[j+3] == 0xE0 {
+							log.Println("pes")
+							left = j
+							break
+						}
+					}
+					//log.Println("vedio data")
+					if j+3 == len(buf) {
+						//left = left - len(buf)
+						w.Write(buf)
+						break
+					}
+				} else {
+					left = left - len(buf)
+					w.Write(buf)
+					break
+				}
+			}
+
+			if left > 0 {
+				w.Write(buf[:left])
+			}
+			i = left
+			streamId := buf[i+3]
+			//log.Println("streamId", streamId)
+			if streamId == 0xc0 {
+				log.Println("音频")
+			} else if streamId == 0xe0 {
+				log.Println("视频")
+			}
+			pesPacketLength := int(buf[i+4])<<8 + int(buf[i+5])
+
+			log.Println("pesPacketLength", pesPacketLength)
+			pesHeaderlength := int(buf[i+8])
+			log.Println("pesHeaderlength", pesHeaderlength)
+			log.Println("h264 header :", buf[i+15+pesHeaderlength:i+20+pesHeaderlength], "size ", i+6+pesPacketLength-i+9+pesHeaderlength)
+			log.Println(buf[i+15+pesHeaderlength:])
+			w.Write(buf[i+15+pesHeaderlength:])
+			//w.Write(buf[i:])
+
+			if pesPacketLength == 0 {
+				left = math.MaxInt32
 			} else {
-				if left > 0 {
-					w.Write(buf[:left])
-				}
-				i = left
-				streamId := buf[i+3]
-				//log.Println("streamId", streamId)
-				if streamId == 0xc0 {
-					log.Println("音频")
-				} else if streamId == 0xe0 {
-					log.Println("视频")
-				}
-				pesPacketLength := int(buf[i+4])<<8 + int(buf[i+5])
-				//log.Println("pesPacketLength", pesPacketLength)
-				pesHeaderlength := int(buf[i+8])
-				//log.Println("pesHeaderlength", pesHeaderlength)
-				log.Println("h264 header :", buf[i+15+pesHeaderlength:i+20+pesHeaderlength], "size ", i+6+pesPacketLength-i+9+pesHeaderlength)
-				w.Write(buf[i+15+pesHeaderlength:])
 				left = i + 6 + pesPacketLength - len(buf)
 			}
 			break

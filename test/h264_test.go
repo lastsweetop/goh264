@@ -38,8 +38,8 @@ func TestFlv2h264(t *testing.T) {
 }
 
 func TestTS2H264(t *testing.T) {
-	inPath := "source/test3.ts"
-	outPath := "source/test3.h264"
+	inPath := "source/1450.ts"
+	outPath := "source/1450.h264"
 
 	ts2h264.Transfer(inPath, outPath)
 
